@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http: https:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vanium</title>
+  <link rel="stylesheet" href="shell.css">
+</head>
+<body data-layout="top" data-platform="win32">
+  <div id="app">
+    <!-- Боковая панель (режим «вкладки сбоку») -->
+    <aside id="sidebar">
+      <div id="sb-head" class="drag">
+        <img class="logo" src="../assets/logo.svg" alt="" width="22" height="22">
+        <span class="brand">Vanium</span>
+        <button id="sb-collapse" class="icon-btn nodrag" type="button"></button>
+      </div>
+      <button id="sb-newtab" class="sb-new nodrag" type="button"></button>
+      <div id="sb-tabs" class="tablist nodrag" role="tablist"></div>
+      <div id="sb-foot" class="nodrag"></div>
+    </aside>
+
+    <div id="col">
+      <!-- Полоса вкладок (режим «вкладки сверху») -->
+      <div id="tabstrip" class="drag">
+        <div id="top-tabs" class="tablist" role="tablist"></div>
+        <button id="top-newtab" class="icon-btn nodrag" type="button"></button>
+      </div>
+
+      <!-- Панель инструментов -->
+      <div id="toolbar" class="drag">
+        <div class="nav nodrag">
+          <button id="btn-back" class="icon-btn" type="button"></button>
+          <button id="btn-forward" class="icon-btn" type="button"></button>
+          <button id="btn-reload" class="icon-btn" type="button"></button>
+        </div>
+
+        <div id="omnibox" class="nodrag">
+          <span id="omni-icon" class="omni-icon"></span>
+          <input id="omni" type="text" spellcheck="false" autocomplete="off" autocapitalize="off">
+          <button id="btn-star" class="icon-btn small" type="button"></button>
+          <div id="load-bar"></div>
+        </div>
+
+        <div class="actions nodrag">
+          <span id="private-pill" class="pill" hidden></span>
+          <button id="btn-shield" class="icon-btn" type="button"><span id="shield-count" class="count" hidden></span></button>
+          <button id="btn-downloads" class="icon-btn" type="button"><span id="dl-bar" class="dl-bar" hidden></span></button>
+          <button id="btn-menu" class="icon-btn" type="button"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../shared/i18n.js"></script>
+  <script src="../shared/icons.js"></script>
+  <script src="shell.js"></script>
+</body>
+</html>

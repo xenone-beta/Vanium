@@ -1,0 +1,50 @@
+{
+  "name": "vanium",
+  "productName": "Vanium",
+  "version": "0.1.0",
+  "description": "Vanium — быстрый минималистичный браузер на Electron",
+  "author": "Vanium",
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "check": "node scripts/check.js",
+    "dist": "electron-builder --win --x64 --publish never",
+    "dist:dir": "electron-builder --win --x64 --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "^44.10.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.vanium.browser",
+    "productName": "Vanium",
+    "copyright": "Copyright © Vanium",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Vanium",
+      "artifactName": "Vanium-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Vanium-Portable-${version}.${ext}"
+    }
+  }
+}
