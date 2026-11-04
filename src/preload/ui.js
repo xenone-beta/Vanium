@@ -22,10 +22,14 @@ const SEND = new Set([
   'layout:toggleSidebar',
   'overlay:update',
   'overlay:hide',
-  'overlay:pick'
+  'overlay:pick',
+  'vex:popup',
+  'site:menu',
+  'shot:done',
+  'shot:cancel'
 ]);
 const INVOKE = new Set(['shell:init', 'omni:suggest']);
-const ON = new Set(['shell:state', 'shell:event', 'overlay:data']);
+const ON = new Set(['shell:state', 'shell:event', 'overlay:data', 'shot:image']);
 
 contextBridge.exposeInMainWorld('vanium', {
   platform: process.platform,
