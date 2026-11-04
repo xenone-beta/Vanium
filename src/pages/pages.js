@@ -72,6 +72,8 @@
     ['bookmarks', 'bookmark', 'pgBookmarks'],
     ['history', 'clock', 'pgHistory'],
     ['downloads', 'download', 'pgDownloads'],
+    ['extensions', 'package', 'pgExtensions'],
+    ['sites', 'globe', 'pgSites'],
     ['settings', 'settings', 'pgSettings']
   ];
 
@@ -460,6 +462,8 @@
       { class: 'card' },
       h('h2', null, T('stPrivacy')),
       setRow(T('stAdblock'), T('stAdblockHint'), toggle('adblock')),
+      setRow(T('stHttpsOnly'), T('stHttpsOnlyHint'), toggle('httpsOnly')),
+      setRow(T('pgSites'), null, h('a', { class: 'btn sm', href: 'vanium://sites/' }, T('menuSites'))),
       setRow(T('stAskDownload'), T('stAskDownloadHint'), toggle('askDownload'))
     );
 
@@ -470,6 +474,24 @@
       setRow(T('stClearHistory'), null, clearBtn('history')),
       setRow(T('stClearCookies'), null, clearBtn('cookies')),
       setRow(T('stClearDownloads'), null, clearBtn('downloads'))
+    );
+
+    const defaultCard = h(
+      'section',
+      { class: 'card' },
+      h('h2', null, T('stDefault')),
+      h('div', { class: 'note', style: 'padding-top:6px' }, T('stDefaultHint')),
+      meta.platform === 'win32'
+        ? h('div', { class: 'upd' }, h('button', { class: 'btn', onclick: () => api.invoke('page:openDefaultApps') }, T('stDefaultBtn')))
+        : null
+    );
+
+    const updatesCard = h(
+      'section',
+      { class: 'card' },
+      h('h2', null, T('stUpdates')),
+      setRow(T('stAutoUpdate'), T('stAutoUpdateHint'), toggle('autoUpdate')),
+      h('div', { id: 'upd-box' })
     );
 
     const keys = h(
@@ -505,8 +527,177 @@
 
     const scrollY = window.scrollY;
     root.textContent = '';
-    root.append(shellPage(T('pgSettings'), null, h('div', null, general, privacy, data, keys, about)));
+    root.append(shellPage(T('pgSettings'), null, h('div', null, general, privacy, defaultCard, updatesCard, data, keys, about)));
     window.scrollTo(0, scrollY);
+    drawUpdate();
+  }
+
+  async function drawUpdate() {
+    const box = document.getElementById('upd-box');
+    if (!box) return;
+    const u = await api.invoke('page:getUpdate');
+    const busy = u.status === 'checking' || u.status === 'downloading';
+    let text = '';
+    if (!u.supported) text = T('upUnsupported');
+    else if (u.status === 'checking') text = T('upChecking');
+    else if (u.status === 'none') text = T('upLatest');
+    else if (u.status === 'available') text = T('upAvailable', { v: u.version });
+    else if (u.status === 'downloading') text = T('upDownloading', { p: u.progress });
+    else if (u.status === 'ready') text = T('upReady', { v: u.version });
+    else if (u.status === 'error') text = T('upError', { e: u.error });
+    box.textContent = '';
+    box.append(
+      h(
+        'div',
+        { class: 'upd' },
+        h('div', { class: 'st' }, text),
+        u.status === 'downloading' ? h('div', { class: 'bar' }, h('i', { style: `width:${u.progress}%` })) : null,
+        u.status === 'ready'
+          ? h('button', { class: 'btn primary', onclick: () => api.invoke('page:installUpdate') }, T('upRestart'))
+          : u.supported
+            ? h('button', { class: 'btn', disabled: busy, onclick: () => api.invoke('page:checkUpdate') }, T('upCheck'))
+            : null
+      )
+    );
+  }
+
+  // =====================================================================
+  // Расширения
+  // =====================================================================
+  async function drawExtensions() {
+    const box = document.getElementById('ext-box');
+    if (!box) return;
+    const items = await api.invoke('page:getExtensions');
+    box.textContent = '';
+    if (!items.length) {
+      box.append(empty('package', T('extEmpty')), h('div', { class: 'hint', style: 'text-align:center' }, T('extEmptyHint')));
+      return;
+    }
+    const list = h('div', { class: 'list' });
+    for (const e of items) {
+      const icon = h('div', { class: 'eicon' });
+      if (e.icon) {
+        const img = h('img', { alt: '' });
+        img.src = e.icon;
+        icon.append(img);
+      } else icon.textContent = (e.name[0] || '?').toUpperCase();
+
+      const chips = [];
+      if (e.hosts.includes('*')) chips.push(h('span', { class: 'chip warn' }, T('extChipAll')));
+      else e.hosts.slice(0, 4).forEach((x) => chips.push(h('span', { class: 'chip' }, x)));
+      if (e.hosts.length > 4 && !e.hosts.includes('*')) chips.push(h('span', { class: 'chip' }, '+' + (e.hosts.length - 4)));
+      if (e.permissions.includes('storage')) chips.push(h('span', { class: 'chip' }, T('extChipStorage')));
+      if (e.permissions.includes('tabs')) chips.push(h('span', { class: 'chip' }, T('extChipTabs')));
+      if (e.hasPopup) chips.push(h('span', { class: 'chip' }, T('extChipPopup')));
+
+      const toggle = h('label', { class: 'switch', title: T('extEnabled') });
+      const input = h('input', { type: 'checkbox' });
+      input.checked = e.enabled && !e.error;
+      input.disabled = !!e.error;
+      input.addEventListener('change', () => api.invoke('page:setExtensionEnabled', e.id, input.checked));
+      toggle.append(input, h('span', { class: 'track' }));
+
+      list.append(
+        h(
+          'div',
+          { class: 'ext' + (e.enabled && !e.error ? '' : ' off') },
+          icon,
+          h(
+            'div',
+            { class: 'einfo' },
+            h('div', { class: 'ename' }, e.name, h('small', null, e.version)),
+            e.description ? h('div', { class: 'edesc' }, e.description) : null,
+            e.error ? h('div', { class: 'eerr' }, T('extBroken') + ': ' + e.error) : h('div', { class: 'chips' }, chips)
+          ),
+          h(
+            'div',
+            { class: 'eact' },
+            toggle,
+            h('button', {
+              class: 'icon-btn danger',
+              title: T('extRemove'),
+              html: ic('trash', 17),
+              onclick: async () => {
+                if (confirm(T('extConfirmRemove', { name: e.name }))) await api.invoke('page:removeExtension', e.id);
+              }
+            })
+          )
+        )
+      );
+    }
+    box.append(list, h('div', { class: 'hint' }, T('extDevHint')));
+  }
+
+  function renderExtensions() {
+    document.title = T('pgExtensions');
+    const install = h(
+      'button',
+      { class: 'btn primary', onclick: () => api.invoke('page:installExtension') },
+      h('span', { html: ic('plus', 16), style: 'display:grid' }),
+      T('extInstallFromFile')
+    );
+    root.textContent = '';
+    root.append(shellPage(T('pgExtensions'), install, h('div', { id: 'ext-box' })));
+    drawExtensions();
+  }
+
+  // =====================================================================
+  // Настройки сайтов
+  // =====================================================================
+  const PERM_LABEL = { geolocation: 'perm_geolocation', media: 'perm_media', notifications: 'perm_notifications', midi: 'perm_midi', midiSysex: 'perm_midi', 'clipboard-read': 'perm_clipboard' };
+
+  async function drawSites() {
+    const box = document.getElementById('sites-box');
+    if (!box) return;
+    const items = await api.invoke('page:getSites');
+    box.textContent = '';
+    if (!items.length) {
+      box.append(empty('globe', T('sitesEmpty')), h('div', { class: 'hint', style: 'text-align:center' }, T('sitesEmptyHint')));
+      return;
+    }
+    const list = h('div', { class: 'list' });
+    for (const s of items) {
+      const chips = [];
+      if (s.zoom) chips.push(h('span', { class: 'chip' }, T('sitesZoom', { z: Math.round(Math.pow(1.2, s.zoom) * 100) })));
+      if (!s.adblock) chips.push(h('span', { class: 'chip warn' }, T('sitesAdblockOff')));
+      for (const [perm, val] of Object.entries(s.perms)) {
+        const label = T(PERM_LABEL[perm] || 'perm_other') + ': ' + T(val === 'allow' ? 'permAllowed' : 'permBlocked');
+        chips.push(
+          h(
+            'span',
+            { class: 'chip' + (val === 'allow' ? '' : ' bad') },
+            label,
+            h('button', { title: T('remove'), onclick: () => api.invoke('page:resetSitePerm', s.host, perm) }, '×')
+          )
+        );
+      }
+      list.append(
+        h(
+          'div',
+          { class: 'site' },
+          h('div', { class: 'sbody' }, h('div', { class: 'shost' }, s.host), h('div', { class: 'chips' }, chips)),
+          h('button', { class: 'icon-btn danger', title: T('remove'), html: ic('trash', 17), onclick: () => api.invoke('page:resetSite', s.host) })
+        )
+      );
+    }
+    box.append(list);
+  }
+
+  function renderSites() {
+    document.title = T('pgSites');
+    const clear = h(
+      'button',
+      {
+        class: 'btn danger',
+        onclick: async () => {
+          if (confirm(T('stConfirmClear'))) await api.invoke('page:clearSites');
+        }
+      },
+      T('sitesClearAll')
+    );
+    root.textContent = '';
+    root.append(shellPage(T('pgSites'), clear, h('div', { id: 'sites-box' })));
+    drawSites();
   }
 
   // =====================================================================
@@ -521,6 +712,14 @@
     if (code.startsWith('ERR_CERT')) key = 'err_ERR_CERT';
     else if (code.startsWith('ERR_BLOCKED')) key = 'err_ERR_BLOCKED';
     const known = I18N.dict.en[key] !== undefined;
+    const safe = /^https?:\/\//i.test(url) ? url : '';
+    const httpsOnly = code === 'HTTPS_ONLY';
+    let hostName = '';
+    try {
+      hostName = new URL(safe).hostname;
+    } catch (_) {
+      /* ignore */
+    }
     root.textContent = '';
     root.append(
       h(
@@ -530,14 +729,29 @@
           'div',
           { class: 'err-card' },
           h('div', { class: 'err-ic', html: ic('alert', 28) }),
-          h('h1', null, T('errTitle')),
-          url ? h('div', { class: 'url' }, url) : null,
-          h('p', null, T(known ? key : 'err_generic')),
-          code ? h('div', { class: 'code' }, T('errCode', { code })) : null,
+          h('h1', null, httpsOnly ? T('errHttpsTitle') : T('errTitle')),
+          safe ? h('div', { class: 'url' }, safe) : null,
+          h('p', null, httpsOnly ? T('errHttpsText', { host: hostName }) : T(known ? key : 'err_generic')),
+          code && !httpsOnly ? h('div', { class: 'code' }, T('errCode', { code })) : h('div', { style: 'height:22px' }),
           h(
             'div',
             { style: 'display:flex;gap:10px' },
-            url ? h('button', { class: 'btn primary', onclick: () => (location.href = url) }, T('errRetry')) : null,
+            httpsOnly && safe
+              ? h(
+                  'button',
+                  {
+                    class: 'btn',
+                    onclick: async () => {
+                      await api.invoke('page:allowHttp', hostName);
+                      location.href = safe;
+                    }
+                  },
+                  T('errContinueHttp')
+                )
+              : null,
+            safe
+              ? h('button', { class: httpsOnly ? 'btn primary' : 'btn primary', onclick: () => (location.href = httpsOnly ? safe.replace(/^http:/i, 'https:') : safe) }, T('errRetry'))
+              : null,
             h('a', { class: 'btn', href: 'vanium://newtab/' }, T('errGoNewtab'))
           )
         )
@@ -558,6 +772,10 @@
         return renderBookmarks();
       case 'downloads':
         return renderDownloads();
+      case 'extensions':
+        return renderExtensions();
+      case 'sites':
+        return renderSites();
       case 'settings':
         return renderSettings();
       case 'error':
@@ -578,6 +796,9 @@
       } else if (kind === 'history' && page === 'history') loadHistory(false);
       else if (kind === 'bookmarks' && page === 'bookmarks') drawBookmarks();
       else if (kind === 'downloads' && page === 'downloads') drawDownloads();
+      else if (kind === 'extensions' && page === 'extensions') drawExtensions();
+      else if (kind === 'sites' && page === 'sites') drawSites();
+      else if (kind === 'update' && page === 'settings') drawUpdate();
     });
   }
 

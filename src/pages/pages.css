@@ -205,3 +205,32 @@ kbd {
   .main { padding: 22px 18px 48px; }
   .quick { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---------- расширения и сайты ---------- */
+.ext { display: flex; align-items: center; gap: 14px; padding: 16px; border-top: 1px solid var(--line); }
+.ext:first-child { border-top: 0; }
+.ext .eicon { width: 44px; height: 44px; border-radius: 12px; background: var(--surface-3); display: grid; place-items: center; flex: none; overflow: hidden; font-weight: 700; font-size: 18px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+.ext .eicon img { width: 28px; height: 28px; object-fit: contain; border-radius: 6px; }
+.ext .einfo { flex: 1; min-width: 0; }
+.ext .ename { font-weight: 600; }
+.ext .ename small { font-weight: 400; color: var(--text-3); margin-left: 8px; }
+.ext .edesc { color: var(--text-2); font-size: 13px; margin-top: 2px; }
+.ext .eerr { color: #ff8b8f; font-size: 12.5px; margin-top: 4px; }
+.ext.off .eicon, .ext.off .einfo { opacity: .55; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { padding: 2px 9px; border-radius: 10px; background: var(--surface-3); color: var(--text-2); font-size: 11.5px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip.warn { color: #f2c779; }
+.chip.bad { color: #ff8b8f; }
+.ext .eact { display: flex; align-items: center; gap: 10px; flex: none; }
+.hint { color: var(--text-3); font-size: 13px; margin: 16px 4px 0; }
+.site { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-top: 1px solid var(--line); }
+.site:first-child { border-top: 0; }
+.site .sbody { flex: 1; min-width: 0; }
+.site .shost { font-weight: 600; }
+.site .icon-btn { opacity: 1; }
+.chip button { all: unset; cursor: pointer; margin-left: 6px; color: var(--text-3); }
+.chip button:hover { color: var(--text); }
+.upd { padding: 0 18px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.upd .st { color: var(--text-2); font-size: 13px; flex: 1; min-width: 160px; }
+.upd .bar { width: 160px; margin: 0; }
+.note { padding: 4px 18px 16px; color: var(--text-3); font-size: 12.5px; }
