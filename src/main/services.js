@@ -14,11 +14,15 @@ const S = {
   bookmarks: null,
   history: null,
   lastSession: null,
+  sites: null,
   downloads: null, // DownloadManager (создаётся в main.js)
   windows: new Set(), // BrowserCtx
   tabByWc: new Map(), // webContents.id -> { ctx, tab }
   ctxByWc: new Map(), // webContents.id оболочки/оверлея -> ctx
-  privateSessions: new WeakSet()
+  privateSessions: new WeakSet(),
+  popupByWc: new Map(), // webContents.id popup расширения -> { ctx, extId }
+  upgraded: new Map(), // host -> время автоматического перехода на https
+  httpAllowed: new Set() // хосты, для которых пользователь разрешил http
 };
 
 const SETTING_VALIDATORS = {
@@ -28,7 +32,9 @@ const SETTING_VALIDATORS = {
   searchEngine: (v) => typeof v === 'string' && Object.prototype.hasOwnProperty.call(ENGINES, v),
   adblock: (v) => typeof v === 'boolean',
   askDownload: (v) => typeof v === 'boolean',
-  restoreSession: (v) => typeof v === 'boolean'
+  restoreSession: (v) => typeof v === 'boolean',
+  httpsOnly: (v) => typeof v === 'boolean',
+  autoUpdate: (v) => typeof v === 'boolean'
 };
 
 S.init = function init() {
@@ -40,11 +46,14 @@ S.init = function init() {
     searchEngine: 'google',
     adblock: true,
     askDownload: false,
-    restoreSession: true
+    restoreSession: true,
+    httpsOnly: false,
+    autoUpdate: true
   });
   S.bookmarks = new JsonStore('bookmarks', []);
   S.history = new JsonStore('history', []);
-  S.lastSession = new JsonStore('session', { urls: [], active: 0, bounds: null, maximized: false });
+  S.lastSession = new JsonStore('session', { urls: [], pins: [], active: 0, bounds: null, maximized: false });
+  S.sites = new JsonStore('sites', {});
 };
 
 S.id = () => crypto.randomUUID();
@@ -194,6 +203,58 @@ S.suggest = function suggest(query) {
   out.sort((a, b) => b.s - a.s);
   return out.slice(0, 6).map(({ s, ...rest }) => rest);
 };
+
+// ---------- настройки сайтов ----------
+// S.sites.data = { "example.com": { zoom: 1, adblock: false, perms: { geolocation: "allow" } } }
+S.siteGet = (host) => S.sites.data[host] || {};
+
+function siteCommit(host, cur) {
+  if (cur.perms && !Object.keys(cur.perms).length) delete cur.perms;
+  if (Object.keys(cur).length) S.sites.data[host] = cur;
+  else delete S.sites.data[host];
+  S.sites.save();
+  S.emitPages('sites');
+}
+
+/** patch: значение null/undefined удаляет поле. */
+S.siteSet = function siteSet(host, patch) {
+  if (!host || typeof host !== 'string') return;
+  const cur = Object.assign({}, S.sites.data[host]);
+  for (const [k, v] of Object.entries(patch)) {
+    if (k !== 'zoom' && k !== 'adblock') continue;
+    if (v === null || v === undefined) delete cur[k];
+    else cur[k] = v;
+  }
+  siteCommit(host, cur);
+};
+
+S.sitePerm = (host, perm) => (S.siteGet(host).perms || {})[perm];
+
+S.siteSetPerm = function siteSetPerm(host, perm, value) {
+  if (!host || typeof perm !== 'string') return;
+  const cur = Object.assign({}, S.sites.data[host]);
+  cur.perms = Object.assign({}, cur.perms);
+  if (value === 'allow' || value === 'block') cur.perms[perm] = value;
+  else delete cur.perms[perm];
+  siteCommit(host, cur);
+};
+
+S.siteReset = function siteReset(host) {
+  delete S.sites.data[host];
+  S.sites.save();
+  S.emitPages('sites');
+};
+
+S.sitesClear = function sitesClear() {
+  S.sites.data = {};
+  S.sites.save();
+  S.emitPages('sites');
+};
+
+S.sitesList = () =>
+  Object.entries(S.sites.data)
+    .map(([host, v]) => ({ host, zoom: v.zoom || 0, adblock: v.adblock !== false, perms: v.perms || {} }))
+    .sort((a, b) => a.host.localeCompare(b.host));
 
 // ---------- рассылка ----------
 S.broadcastState = function broadcastState() {
