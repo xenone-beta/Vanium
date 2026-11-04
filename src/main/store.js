@@ -34,6 +34,18 @@ class JsonStore {
     this._timer = setTimeout(() => this.flush(), 400);
   }
 
+  /** Удаляет файл хранилища и отменяет отложенную запись. */
+  destroy() {
+    clearTimeout(this._timer);
+    this._timer = null;
+    registry.delete(this);
+    try {
+      fs.rmSync(this.file, { force: true });
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   flush() {
     clearTimeout(this._timer);
     this._timer = null;
