@@ -139,6 +139,7 @@
 
   function updateTab(el, tab, active) {
     el.classList.toggle('active', active);
+    el.classList.toggle('pinned', !!tab.pinned);
     el.setAttribute('aria-selected', active ? 'true' : 'false');
     const title = tabTitle(tab);
     el.title = title;
@@ -206,6 +207,8 @@
     });
 
     container.classList.toggle('dense', !side && S.tabs.length > 7);
+    const lastPinned = S.tabs.filter((t) => t.pinned).length - 1;
+    frag.forEach((el, i) => el.classList.toggle('last-pinned', i === lastPinned && lastPinned < S.tabs.length - 1));
   }
 
   // ---------- общий рендер ----------
@@ -270,7 +273,43 @@
     const collapsed = S.settings.sidebarCollapsed;
     setIcon('sb-collapse', 'sidebar', 17);
     $('sb-collapse').title = collapsed ? T('expandSidebar') : T('collapseSidebar');
+    renderExtensions();
     renderFoot();
+  }
+
+  function renderExtensions() {
+    const box = $('ext-actions');
+    const list = S.extensions || [];
+    const sig = list.map((e) => e.id + '|' + e.title + '|' + e.icon.length).join(',');
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    box.textContent = '';
+    list.forEach((ext) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'icon-btn';
+      b.title = ext.title || ext.name;
+      if (ext.icon) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.src = ext.icon;
+        b.appendChild(img);
+      } else {
+        const l = document.createElement('span');
+        l.className = 'letter';
+        l.textContent = (ext.name[0] || '?').toUpperCase();
+        b.appendChild(l);
+      }
+      b.addEventListener('click', () => {
+        const r = b.getBoundingClientRect();
+        api.send('vex:popup', ext.id, { right: r.right, bottom: r.bottom });
+      });
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        api.send('internal:open', 'extensions');
+      });
+      box.appendChild(b);
+    });
   }
 
   function renderFoot() {
@@ -282,6 +321,7 @@
       ['bookmark', 'bookmarks', 'menuBookmarks'],
       ['clock', 'history', 'menuHistory'],
       ['download', 'downloads', 'menuDownloads'],
+      ['package', 'extensions', 'menuExtensions'],
       ['settings', 'settings', 'menuSettings']
     ].forEach(([ic, page, key]) => {
       const b = document.createElement('button');
@@ -382,7 +422,12 @@
   $('btn-reload').addEventListener('click', () => api.send('nav:reload'));
   $('btn-star').addEventListener('click', () => api.send('bookmark:toggle'));
   $('btn-downloads').addEventListener('click', () => api.send('downloads:open'));
-  $('btn-shield').addEventListener('click', () => api.send('internal:open', 'settings'));
+  const siteMenu = (el) => () => {
+    const r = el.getBoundingClientRect();
+    api.send('site:menu', r.left, r.bottom + 4);
+  };
+  $('btn-shield').addEventListener('click', siteMenu($('btn-shield')));
+  $('omni-icon').addEventListener('click', siteMenu($('omni-icon')));
   $('top-newtab').addEventListener('click', () => api.send('tab:new'));
   $('sb-newtab').addEventListener('click', () => api.send('tab:new'));
   $('sb-collapse').addEventListener('click', () => api.send('layout:toggleSidebar'));

@@ -167,6 +167,22 @@ body[data-platform="darwin"][data-layout="side"] #sb-head { padding-left: 78px; 
 }
 .tab .audio:hover, .tab .close:hover { background: var(--line); color: var(--text); }
 
+/* ---------- закреплённые вкладки ---------- */
+#top-tabs .tab.pinned { flex: 0 0 38px; width: 38px; min-width: 38px; padding: 0; justify-content: center; }
+#top-tabs .tab.pinned .title, #top-tabs .tab.pinned .close, #top-tabs .tab.pinned .audio { display: none; }
+#sb-tabs .tab.pinned .close { display: none; }
+#sb-tabs .tab.pinned::after {
+  content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-dim); flex: none; margin-right: 6px;
+}
+#sb-tabs .tab.pinned.last-pinned { margin-bottom: 6px; }
+body.collapsed #sb-tabs .tab.pinned::after { display: none; }
+
+/* ---------- кнопки расширений ---------- */
+.ext-actions { display: inline-flex; align-items: center; gap: 2px; }
+.ext-actions .icon-btn img { width: 18px; height: 18px; border-radius: 4px; object-fit: contain; }
+.ext-actions .icon-btn .letter { font-weight: 700; font-size: 13px; color: var(--text); }
+.ext-actions .icon-btn.open { background: var(--surface-3); }
+
 /* ---------- боковая панель ---------- */
 #sidebar {
   width: var(--sidebar-w);
@@ -255,7 +271,8 @@ body.collapsed #sb-foot { flex-direction: column; }
   border-color: var(--accent-dim);
   box-shadow: 0 0 0 3px rgba(196, 196, 204, .12);
 }
-.omni-icon { display: grid; place-items: center; color: var(--text-3); flex: none; }
+.omni-icon { display: grid; place-items: center; color: var(--text-3); flex: none; cursor: default; width: 24px; height: 24px; border-radius: 6px; margin-left: -6px; }
+.omni-icon:hover { background: var(--surface-3); color: var(--text); }
 #omnibox.secure .omni-icon { color: var(--text-2); }
 #omni {
   flex: 1; min-width: 0; height: 100%;

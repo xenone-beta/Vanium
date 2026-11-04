@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:">
+  <title>Vanium screenshot</title>
+  <link rel="stylesheet" href="select.css">
+</head>
+<body>
+  <img id="bg" alt="" draggable="false">
+  <div id="shade"></div>
+  <div id="sel" hidden></div>
+  <div id="hint"></div>
+  <div id="bar" hidden>
+    <button id="b-save" type="button" class="primary"></button>
+    <button id="b-copy" type="button"></button>
+    <button id="b-cancel" type="button" class="ghost"></button>
+  </div>
+  <script src="../shared/i18n.js"></script>
+  <script src="select.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; cursor: crosshair; background: #000;
+  font: 13px/1.3 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #ececef; }
+#bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+#shade { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); }
+#sel { position: absolute; border: 1px solid #fff; box-shadow: 0 0 0 99999px rgba(0, 0, 0, .55); background: transparent; outline: 1px dashed rgba(0,0,0,.5); }
+#sel::after { content: attr(data-size); position: absolute; left: 0; top: -22px; padding: 1px 6px; border-radius: 4px; background: #17171a; color: #ececef; font-size: 11px; white-space: nowrap; }
+#hint { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); padding: 7px 14px; border-radius: 16px; background: #17171a; border: 1px solid #2b2b31; color: #ececef; pointer-events: none; }
+#bar { position: absolute; display: flex; gap: 6px; padding: 6px; border-radius: 11px; background: #17171a; border: 1px solid #2b2b31; box-shadow: 0 8px 24px rgba(0,0,0,.5); cursor: default; }
+#bar button { height: 30px; padding: 0 14px; border: 1px solid #2b2b31; border-radius: 8px; background: #1d1d21; color: #ececef; font: inherit; cursor: pointer; }
+#bar button:hover { background: #26262b; }
+#bar button.primary { background: #e4e4e8; color: #111114; border-color: transparent; font-weight: 600; }
+#bar button.primary:hover { background: #fff; }
+#bar button.ghost { background: transparent; }
