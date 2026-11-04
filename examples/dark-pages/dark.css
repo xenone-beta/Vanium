@@ -1,0 +1,7 @@
+/* Инверсия цветов страницы; картинки и видео возвращаем в исходный вид */
+html.vex-dark-pages { filter: invert(1) hue-rotate(180deg); background: #fff; }
+html.vex-dark-pages img,
+html.vex-dark-pages picture,
+html.vex-dark-pages video,
+html.vex-dark-pages canvas,
+html.vex-dark-pages [style*="background-image"] { filter: invert(1) hue-rotate(180deg); }

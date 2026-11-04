@@ -1,0 +1,22 @@
+{
+  "id": "dark-pages",
+  "name": "Dark Pages",
+  "version": "1.0.0",
+  "description": "Тёмный режим для любых сайтов. Включается кнопкой в панели инструментов.",
+  "icon": "icon.png",
+  "permissions": ["storage", "tabs"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "css": ["dark.css"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "title": "Тёмный режим",
+    "popup": "popup.html",
+    "popup_width": 260,
+    "popup_height": 150
+  }
+}
