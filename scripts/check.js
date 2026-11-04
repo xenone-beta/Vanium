@@ -8,7 +8,9 @@ const root = path.join(__dirname, '..');
 const required = [
   'src/main/main.js', 'src/preload/ui.js', 'src/preload/page.js',
   'src/renderer/index.html', 'src/renderer/overlay.html', 'src/pages/index.html',
-  'src/assets/logo.svg', 'build/icon.png', 'build/icon.ico'
+  'src/assets/logo.svg', 'build/icon.png', 'build/icon.ico', 'build/installer.nsh',
+  'src/main/extensions.js', 'src/main/updater.js', 'src/main/webrequest.js', 'src/preload/vex-popup.js',
+  'src/renderer/select.html', 'docs/EXTENSIONS.md'
 ];
 let bad = 0;
 for (const f of required) if (!fs.existsSync(path.join(root, f))) { console.error('missing:', f); bad++; }
