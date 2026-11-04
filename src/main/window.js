@@ -1,9 +1,12 @@
 'use strict';
 const path = require('path');
-const { BrowserWindow, WebContentsView, Menu, clipboard, shell, app } = require('electron');
+const fs = require('fs');
+const { fileURLToPath } = require('url');
+const { BrowserWindow, WebContentsView, Menu, clipboard, shell, app, nativeImage, Notification } = require('electron');
 const S = require('./services');
 const { engineFor, resolveInput, searchUrl, NEWTAB } = require('./engines');
-const { getMainSession, createPrivateSession } = require('./sessions');
+const { getMainSession, createPrivateSession, getExtSession } = require('./sessions');
+const extensions = require('./extensions');
 const { t } = require('../shared/i18n');
 
 const BG = '#0e0e10';
@@ -12,6 +15,17 @@ const PRELOAD_UI = path.join(__dirname, '..', 'preload', 'ui.js');
 const PRELOAD_PAGE = path.join(__dirname, '..', 'preload', 'page.js');
 const SHELL_HTML = path.join(__dirname, '..', 'renderer', 'index.html');
 const OVERLAY_HTML = path.join(__dirname, '..', 'renderer', 'overlay.html');
+const SELECT_HTML = path.join(__dirname, '..', 'renderer', 'select.html');
+const PRELOAD_VEX = path.join(__dirname, '..', 'preload', 'vex-popup.js');
+
+const PERM_KEYS = {
+  geolocation: 'perm_geolocation',
+  media: 'perm_media',
+  notifications: 'perm_notifications',
+  midi: 'perm_midi',
+  midiSysex: 'perm_midi',
+  'clipboard-read': 'perm_clipboard'
+};
 
 function computeLayout(settings) {
   if (settings.tabLayout === 'side') {
@@ -37,16 +51,8 @@ function isInternal(url) {
   return typeof url === 'string' && url.startsWith('vanium://');
 }
 
-function hostLabel(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch (_) {
-    return url;
-  }
-}
-
 class BrowserCtx {
-  constructor({ isPrivate = false, urls = [], active = 0, bounds = null, maximized = false } = {}) {
+  constructor({ isPrivate = false, urls = [], pins = [], active = 0, bounds = null, maximized = false } = {}) {
     this.isPrivate = isPrivate;
     this.tabs = [];
     this.activeId = null;
@@ -57,6 +63,10 @@ class BrowserCtx {
     this._stateTimer = null;
     this._sessionTimer = null;
     this._overlayOpen = false;
+    this.popup = null; // { view, extId }
+    this.popupClosedAt = 0;
+    this.popupLastExt = '';
+    this.selectView = null;
     this.session = isPrivate ? createPrivateSession() : getMainSession();
 
     const layout = computeLayout(S.settings.data);
@@ -122,7 +132,7 @@ class BrowserCtx {
     S.windows.add(this);
 
     const list = urls.length ? urls : [NEWTAB];
-    list.forEach((u, i) => this.createTab(u, { activate: false }));
+    list.forEach((u, i) => this.createTab(u, { activate: false, pinned: !!pins[i] }));
     const idx = Math.min(Math.max(active || 0, 0), this.tabs.length - 1);
     this.activate(this.tabs[idx].id);
     if (list.length === 1 && isInternal(list[0]) && list[0].startsWith(NEWTAB)) this.focusOmni();
@@ -141,7 +151,7 @@ class BrowserCtx {
     return this.tabs.find((x) => x.id === id) || null;
   }
 
-  createTab(url, { activate = true, index } = {}) {
+  createTab(url, { activate = true, index, pinned = false } = {}) {
     const view = new WebContentsView({
       webPreferences: {
         session: this.session,
@@ -166,11 +176,17 @@ class BrowserCtx {
       audible: false,
       muted: false,
       blocked: 0,
-      zoom: 0
+      zoom: 0,
+      pinned: !!pinned
     };
 
-    if (index === undefined || index < 0 || index > this.tabs.length) this.tabs.push(tab);
-    else this.tabs.splice(index, 0, tab);
+    if (pinned) {
+      this.tabs.splice(this.pinnedCount(), 0, tab);
+    } else {
+      const min = this.pinnedCount();
+      if (index === undefined || index < min || index > this.tabs.length) this.tabs.push(tab);
+      else this.tabs.splice(index, 0, tab);
+    }
 
     S.tabByWc.set(tab.wc.id, { ctx: this, tab });
     view.setVisible(false);
@@ -227,6 +243,8 @@ class BrowserCtx {
       tab.url = url;
       tab.icon = isInternal(url) ? '' : tab.icon;
       this._recordVisit(tab, url);
+      this._applySiteZoom(tab, url);
+      this.closePopup();
       this.scheduleState();
     });
 
@@ -241,7 +259,20 @@ class BrowserCtx {
     wc.on('did-fail-load', (_e, code, desc, validatedURL, isMainFrame) => {
       if (!isMainFrame || code === -3) return; // -3 — отмена (ERR_ABORTED)
       if (isInternal(validatedURL)) return;
-      const u = `vanium://error/?code=${encodeURIComponent(desc)}&n=${code}&url=${encodeURIComponent(validatedURL)}`;
+      let shown = desc;
+      let target = validatedURL;
+      try {
+        const f = new URL(validatedURL);
+        const at = S.upgraded.get(f.hostname);
+        if (f.protocol === 'https:' && at && Date.now() - at < 30000) {
+          f.protocol = 'http:';
+          shown = 'HTTPS_ONLY';
+          target = f.toString();
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      const u = `vanium://error/?code=${encodeURIComponent(shown)}&n=${code}&url=${encodeURIComponent(target)}`;
       wc.loadURL(u).catch(() => {});
     });
 
@@ -264,6 +295,8 @@ class BrowserCtx {
       if (/^(mailto|tel):/i.test(url)) {
         e.preventDefault();
         shell.openExternal(url).catch(() => {});
+      } else if (this.handleDroppedFile(url)) {
+        e.preventDefault();
       }
     });
 
@@ -358,10 +391,31 @@ class BrowserCtx {
     for (const x of this.tabs.slice(i + 1)) this.closeTab(x.id);
   }
 
+  pinnedCount() {
+    let n = 0;
+    for (const x of this.tabs) if (x.pinned) n++;
+    return n;
+  }
+
+  togglePin(id) {
+    const tab = this.tabById(id);
+    if (!tab) return;
+    this.tabs.splice(this.tabs.indexOf(tab), 1);
+    tab.pinned = !tab.pinned;
+    // закреплённые всегда в начале; новая закреплённая — в конец группы, открепленная — в начало остальных
+    this.tabs.splice(this.pinnedCount(), 0, tab);
+    this.scheduleState();
+    this.scheduleSessionSave();
+  }
+
   moveTab(id, toIndex) {
     const from = this.tabs.findIndex((x) => x.id === id);
     if (from < 0) return;
-    const to = Math.max(0, Math.min(this.tabs.length - 1, toIndex));
+    const pinned = this.tabs[from].pinned;
+    const pc = this.pinnedCount();
+    const lo = pinned ? 0 : pc;
+    const hi = pinned ? pc - 1 : this.tabs.length - 1;
+    const to = Math.max(lo, Math.min(hi, toIndex));
     const [tab] = this.tabs.splice(from, 1);
     this.tabs.splice(to, 0, tab);
     this.scheduleState();
@@ -463,6 +517,32 @@ class BrowserCtx {
     if (!tab) return;
     tab.zoom = delta === 0 ? 0 : Math.max(-3, Math.min(5, tab.zoom + delta));
     tab.wc.setZoomLevel(tab.zoom);
+    const host = this._hostOf(tab);
+    if (host && !this.isPrivate) S.siteSet(host, { zoom: tab.zoom === 0 ? null : tab.zoom });
+  }
+
+  _hostOf(tab) {
+    try {
+      const u = new URL(effectiveUrl(tab.wc.getURL()));
+      return /^https?:$/.test(u.protocol) ? u.hostname.toLowerCase() : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  _applySiteZoom(tab, url) {
+    let host = '';
+    try {
+      const u = new URL(url);
+      host = /^https?:$/.test(u.protocol) ? u.hostname.toLowerCase() : '';
+    } catch (_) {
+      /* ignore */
+    }
+    const z = host && !this.isPrivate ? S.siteGet(host).zoom || 0 : 0;
+    if (tab.zoom !== z) {
+      tab.zoom = z;
+      tab.wc.setZoomLevel(z);
+    }
   }
 
   toggleDevTools() {
@@ -513,6 +593,8 @@ class BrowserCtx {
     if (this.win.isDestroyed()) return;
     const rect = this.contentRect();
     for (const x of this.tabs) x.view.setBounds(rect);
+    this.closePopup();
+    if (this.selectView) this.closeSelect();
     this.scheduleState();
   }
 
@@ -588,8 +670,10 @@ class BrowserCtx {
         icon: x.icon,
         loading: x.loading,
         audible: x.audible,
-        muted: x.muted
+        muted: x.muted,
+        pinned: x.pinned
       })),
+      extensions: this.isPrivate ? [] : extensions.actions(),
       activeId: this.activeId,
       canBack: !!(nh && nh.canGoBack()),
       canForward: !!(nh && nh.canGoForward()),
@@ -622,16 +706,16 @@ class BrowserCtx {
 
   saveSession() {
     if (this.isPrivate || this.win.isDestroyed()) return;
-    const urls = this.tabs
-      .map((x) => effectiveUrl(x.wc.isDestroyed() ? x.url : x.wc.getURL()))
-      .filter((u) => /^https?:/i.test(u) || (isInternal(u) && !u.startsWith('vanium://error')));
-    const active = Math.max(0, this.tabs.findIndex((x) => x.id === this.activeId));
-    const maximized = this.win.isMaximized();
+    const kept = this.tabs
+      .map((x) => ({ x, url: effectiveUrl(x.wc.isDestroyed() ? x.url : x.wc.getURL()) }))
+      .filter((r) => /^https?:/i.test(r.url) || (isInternal(r.url) && !r.url.startsWith('vanium://error')));
+    const activeIdx = Math.max(0, kept.findIndex((r) => r.x.id === this.activeId));
     S.lastSession.data = {
-      urls,
-      active,
+      urls: kept.map((r) => r.url),
+      pins: kept.map((r) => !!r.x.pinned),
+      active: activeIdx,
       bounds: this.win.getNormalBounds(),
-      maximized
+      maximized: this.win.isMaximized()
     };
     S.lastSession.save();
   }
@@ -651,6 +735,8 @@ class BrowserCtx {
 
   _onClosed() {
     this.closing = true;
+    this.closePopup();
+    this.closeSelect();
     clearTimeout(this._stateTimer);
     clearTimeout(this._sessionTimer);
     for (const tab of this.tabs) {
@@ -665,6 +751,303 @@ class BrowserCtx {
       this.session.clearStorageData().catch(() => {});
       this.session.clearCache().catch(() => {});
     }
+  }
+
+  // ===================== файлы .vex =====================
+  handleDroppedFile(url) {
+    if (!/^file:\/\/.+\.vex$/i.test(url)) return false;
+    let file;
+    try {
+      file = fileURLToPath(url);
+    } catch (_) {
+      return false;
+    }
+    if (this.isPrivate) return true;
+    extensions.installFromFile(file, this.win).then((ok) => ok && this.openInternal('extensions'));
+    return true;
+  }
+
+  // ===================== popup расширений =====================
+  togglePopup(extId, rect) {
+    if (typeof extId !== 'string' || this.isPrivate) return;
+    if (this.popup && this.popup.extId === extId) {
+      this.closePopup();
+      return;
+    }
+    // клик по кнопке, которая только что закрыла popup потерей фокуса, не открывает его снова
+    if (this.popupLastExt === extId && Date.now() - this.popupClosedAt < 300) return;
+    this.openPopup(extId, rect);
+  }
+
+  openPopup(extId, rect) {
+    this.closePopup();
+    const info = extensions.popupInfo(extId);
+    if (!info) return;
+    const [w, h] = this.win.getContentSize();
+    const width = Math.min(info.width, w - 16);
+    const height = Math.min(info.height, h - 80);
+    const right = rect && Number.isFinite(rect.right) ? rect.right : w;
+    const bottom = rect && Number.isFinite(rect.bottom) ? rect.bottom : 80;
+    const x = Math.max(8, Math.min(w - width - 8, Math.round(right - width)));
+    const y = Math.round(bottom + 6);
+
+    const view = new WebContentsView({
+      webPreferences: { session: getExtSession(), preload: PRELOAD_VEX, contextIsolation: true, sandbox: true, nodeIntegration: false }
+    });
+    if (typeof view.setBorderRadius === 'function') view.setBorderRadius(12);
+    view.setBackgroundColor('#17171a');
+    view.setBounds({ x, y, width, height });
+    this.win.contentView.addChildView(view);
+    this.popup = { view, extId };
+    const wc = view.webContents;
+    S.popupByWc.set(wc.id, { ctx: this, extId });
+
+    const openLink = (url) => {
+      if (/^https?:\/\//i.test(url)) this.createTab(url);
+    };
+    wc.setWindowOpenHandler(({ url }) => {
+      openLink(url);
+      return { action: 'deny' };
+    });
+    wc.on('will-navigate', (e, url) => {
+      if (!url.startsWith(`vex://${extId}/`)) {
+        e.preventDefault();
+        openLink(url);
+      }
+    });
+    const pagePath = info.popup.split('/').map(encodeURIComponent).join('/');
+    wc.loadURL(`vex://${extId}/${pagePath}`).catch(() => {});
+    wc.once('did-finish-load', () => {
+      if (!wc.isDestroyed()) wc.focus();
+    });
+  }
+
+  closePopup() {
+    if (!this.popup) return;
+    const { view, extId } = this.popup;
+    this.popup = null;
+    this.popupClosedAt = Date.now();
+    this.popupLastExt = extId;
+    S.popupByWc.delete(view.webContents.id);
+    try {
+      this.win.contentView.removeChildView(view);
+    } catch (_) {
+      /* ignore */
+    }
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  }
+
+  /** Операции popup с вкладками (нужно разрешение tabs). */
+  popupTabsOp(extId, op, arg) {
+    if (!extensions.has(extId, 'tabs')) throw new Error('Нет разрешения tabs');
+    const tab = this.active();
+    if (op === 'active') {
+      if (!tab) return null;
+      const url = effectiveUrl(tab.wc.getURL());
+      return { url: /^https?:/i.test(url) ? url : '', title: tab.title || '' };
+    }
+    if (op === 'open') {
+      if (typeof arg === 'string' && /^https?:\/\//i.test(arg)) {
+        this.createTab(arg);
+        return true;
+      }
+      return false;
+    }
+    if (op === 'message') {
+      if (!tab || !/^https?:/i.test(effectiveUrl(tab.wc.getURL()))) return false;
+      const json = JSON.stringify(arg === undefined ? null : arg);
+      if (json.length > 65536) throw new Error('Сообщение слишком большое');
+      tab.wc.send('vex:message', extId, JSON.parse(json));
+      return true;
+    }
+    throw new Error('Неизвестная операция');
+  }
+
+  // ===================== скриншоты =====================
+  _shotFail(err) {
+    console.error('[screenshot]', err && err.message);
+    new Notification({ title: this._t('shotFailed'), body: String((err && err.message) || ''), silent: true }).show();
+  }
+
+  _deliverShot(png, copyOnly) {
+    clipboard.writeImage(nativeImage.createFromBuffer(png));
+    if (copyOnly) {
+      new Notification({ title: this._t('shotCopied'), silent: true }).show();
+      return;
+    }
+    const dir = path.join(app.getPath('pictures'), 'Vanium');
+    fs.mkdirSync(dir, { recursive: true });
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const name = `Vanium-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}.png`;
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, png);
+    const n = new Notification({ title: this._t('shotSaved'), body: name, silent: true });
+    n.on('click', () => shell.showItemInFolder(file));
+    n.show();
+  }
+
+  async shotVisible() {
+    const tab = this.active();
+    if (!tab) return;
+    try {
+      const img = await tab.wc.capturePage();
+      if (!img || img.isEmpty()) throw new Error('empty image');
+      this._deliverShot(img.toPNG(), false);
+    } catch (e) {
+      this._shotFail(e);
+    }
+  }
+
+  async shotFull() {
+    const tab = this.active();
+    if (!tab) return;
+    const dbg = tab.wc.debugger;
+    let attached = false;
+    try {
+      dbg.attach('1.3');
+      attached = true;
+      const m = await dbg.sendCommand('Page.getLayoutMetrics');
+      const cs = m.cssContentSize || m.contentSize;
+      const width = Math.max(1, Math.ceil(cs.width));
+      const height = Math.max(1, Math.min(16000, Math.ceil(cs.height)));
+      const r = await dbg.sendCommand('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: true,
+        fromSurface: true,
+        clip: { x: 0, y: 0, width, height, scale: 1 }
+      });
+      this._deliverShot(Buffer.from(r.data, 'base64'), false);
+    } catch (e) {
+      if (attached) {
+        this._shotFail(e);
+      } else {
+        await this.shotVisible(); // отладчик занят — делаем видимую часть
+      }
+    } finally {
+      if (attached) {
+        try {
+          dbg.detach();
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  async shotArea() {
+    const tab = this.active();
+    if (!tab || this.selectView) return;
+    this.closePopup();
+    this.setOverlay(null);
+    let img;
+    try {
+      img = await tab.wc.capturePage();
+      if (!img || img.isEmpty()) throw new Error('empty image');
+    } catch (e) {
+      this._shotFail(e);
+      return;
+    }
+    const rect = this.contentRect();
+    const view = new WebContentsView({
+      webPreferences: { preload: PRELOAD_UI, contextIsolation: true, sandbox: true, nodeIntegration: false }
+    });
+    view.setBounds(rect);
+    this.win.contentView.addChildView(view);
+    this.selectView = view;
+    this.shotImage = img;
+    this.shotRect = rect;
+    S.ctxByWc.set(view.webContents.id, this);
+    view.webContents.loadFile(SELECT_HTML);
+    view.webContents.once('did-finish-load', () => {
+      if (view.webContents.isDestroyed()) return;
+      view.webContents.send('shot:image', { url: img.toDataURL(), lang: S.lang() });
+      view.webContents.focus();
+    });
+  }
+
+  finishArea(r, mode) {
+    const img = this.shotImage;
+    const rect = this.shotRect;
+    this.closeSelect();
+    if (!img || !rect || !r) return;
+    const size = img.getSize();
+    const k = size.width / rect.width;
+    const x = Math.max(0, Math.round(r.x * k));
+    const y = Math.max(0, Math.round(r.y * k));
+    const w = Math.min(size.width - x, Math.round(r.w * k));
+    const h = Math.min(size.height - y, Math.round(r.h * k));
+    if (w < 4 || h < 4) return;
+    try {
+      this._deliverShot(img.crop({ x, y, width: w, height: h }).toPNG(), mode === 'copy');
+    } catch (e) {
+      this._shotFail(e);
+    }
+  }
+
+  closeSelect() {
+    if (!this.selectView) return;
+    const v = this.selectView;
+    this.selectView = null;
+    this.shotImage = null;
+    S.ctxByWc.delete(v.webContents.id);
+    try {
+      this.win.contentView.removeChildView(v);
+    } catch (_) {
+      /* ignore */
+    }
+    if (!v.webContents.isDestroyed()) v.webContents.close();
+    if (!this.win.isDestroyed()) this.focusPage();
+  }
+
+  // ===================== меню сайта (замок / щит) =====================
+  showSiteMenu(x, y) {
+    const T = (k, v) => this._t(k, v);
+    const tab = this.active();
+    const host = tab ? this._hostOf(tab) : '';
+    const items = [];
+    if (!host) {
+      items.push({ label: T('siteNone'), enabled: false });
+    } else {
+      const site = S.siteGet(host);
+      const globalOn = S.settings.data.adblock;
+      items.push({ label: host, enabled: false }, { type: 'separator' });
+      items.push({
+        label: T('siteAdblock'),
+        type: 'checkbox',
+        checked: globalOn && site.adblock !== false,
+        enabled: globalOn,
+        click: (mi) => {
+          S.siteSet(host, { adblock: mi.checked ? null : false });
+          tab.wc.reload();
+        }
+      });
+      items.push({ label: T('adblockOn', { n: tab.blocked }), enabled: false });
+      for (const [perm, val] of Object.entries(site.perms || {})) {
+        items.push({
+          label: T('siteResetPerm', { perm: T(PERM_KEYS[perm] || 'perm_other'), value: T(val === 'allow' ? 'permAllowed' : 'permBlocked') }),
+          click: () => S.siteSetPerm(host, perm, null)
+        });
+      }
+      if (site.zoom) {
+        items.push({ type: 'separator' });
+        items.push({ label: T('siteZoom', { z: Math.round(Math.pow(1.2, site.zoom) * 100) }), enabled: false });
+        items.push({ label: T('siteResetZoom'), click: () => this.zoom(0) });
+      }
+      items.push({ type: 'separator' });
+      items.push({
+        label: T('siteReset'),
+        enabled: Object.keys(site).length > 0,
+        click: () => {
+          S.siteReset(host);
+          tab.zoom = 0;
+          tab.wc.setZoomLevel(0);
+          tab.wc.reload();
+        }
+      });
+    }
+    items.push({ type: 'separator' }, { label: T('siteAll'), click: () => this.openInternal('sites') });
+    Menu.buildFromTemplate(items).popup({ window: this.win, x: Math.round(x), y: Math.round(y) });
   }
 
   // ===================== горячие клавиши =====================
@@ -705,6 +1088,9 @@ class BrowserCtx {
         return run(() => this.reload(shift));
       case 'KeyD':
         return run(() => this.toggleBookmark());
+      case 'KeyS':
+        if (shift) return run(() => this.shotArea());
+        return;
       case 'KeyH':
         return run(() => this.openInternal('history'));
       case 'KeyJ':
@@ -753,6 +1139,8 @@ class BrowserCtx {
       { label: T('menuBookmarks'), accelerator: 'CmdOrCtrl+Shift+B', click: () => this.openInternal('bookmarks') },
       { label: T('menuHistory'), accelerator: 'CmdOrCtrl+H', click: () => this.openInternal('history') },
       { label: T('menuDownloads'), accelerator: 'CmdOrCtrl+J', click: () => this.openInternal('downloads') },
+      { label: T('menuExtensions'), click: () => this.openInternal('extensions') },
+      { label: T('menuSites'), click: () => this.openInternal('sites') },
       { type: 'separator' },
       {
         label: T('menuZoom'),
@@ -760,6 +1148,14 @@ class BrowserCtx {
           { label: T('menuZoomIn'), accelerator: 'CmdOrCtrl+=', click: () => this.zoom(0.5) },
           { label: T('menuZoomOut'), accelerator: 'CmdOrCtrl+-', click: () => this.zoom(-0.5) },
           { label: T('menuZoomReset'), accelerator: 'CmdOrCtrl+0', click: () => this.zoom(0) }
+        ]
+      },
+      {
+        label: T('menuScreenshot'),
+        submenu: [
+          { label: T('shotArea'), accelerator: 'CmdOrCtrl+Shift+S', click: () => this.shotArea() },
+          { label: T('shotVisible'), click: () => this.shotVisible() },
+          { label: T('shotFull'), click: () => this.shotFull() }
         ]
       },
       { label: T('menuFullscreen'), accelerator: 'F11', click: () => this.toggleFullscreen() },
@@ -784,6 +1180,7 @@ class BrowserCtx {
     const idx = this.tabs.indexOf(tab);
     const menu = Menu.buildFromTemplate([
       { label: T('tabReload'), click: () => tab.wc.reload() },
+      { label: tab.pinned ? T('tabUnpin') : T('tabPin'), click: () => this.togglePin(id) },
       { label: T('tabDuplicate'), click: () => this.duplicateTab(id) },
       { label: tab.muted ? T('tabUnmute') : T('tabMute'), click: () => this.toggleMute(id) },
       { type: 'separator' },

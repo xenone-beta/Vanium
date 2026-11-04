@@ -3,13 +3,14 @@ const path = require('path');
 const fs = require('fs');
 const { net, protocol } = require('electron');
 const { pathToFileURL } = require('url');
+const extensions = require('./extensions');
 
 const PAGES_DIR = path.join(__dirname, '..', 'pages');
 const SHARED_DIR = path.join(__dirname, '..', 'shared');
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 
 /** Адреса vanium://<имя>/ — внутренние страницы браузера. */
-const PAGES = new Set(['newtab', 'settings', 'history', 'bookmarks', 'downloads', 'error']);
+const PAGES = new Set(['newtab', 'settings', 'history', 'bookmarks', 'downloads', 'extensions', 'sites', 'error']);
 
 const CSP = [
   "default-src 'none'",
@@ -23,7 +24,8 @@ const CSP = [
 
 function registerScheme() {
   protocol.registerSchemesAsPrivileged([
-    { scheme: 'vanium', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
+    { scheme: 'vanium', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+    { scheme: 'vex', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
   ]);
 }
 
@@ -60,4 +62,36 @@ function attach(ses) {
   ses.protocol.handle('vanium', handler);
 }
 
-module.exports = { registerScheme, attach, PAGES };
+// Страницы расширений: свои скрипты и стили, сеть только по https.
+const VEX_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https: http:",
+  "font-src 'self' data:",
+  "connect-src https:",
+  "base-uri 'none'",
+  "form-action 'none'"
+].join('; ');
+
+async function vexHandler(request) {
+  let u;
+  try {
+    u = new URL(request.url);
+  } catch (_) {
+    return new Response('Bad request', { status: 400 });
+  }
+  const file = extensions.popupFile(u.hostname, decodeURIComponent(u.pathname));
+  if (!file) return new Response('Not found', { status: 404 });
+  const res = await net.fetch(pathToFileURL(file).toString());
+  const headers = new Headers(res.headers);
+  headers.set('Content-Security-Policy', VEX_CSP);
+  headers.set('Cache-Control', 'no-store');
+  return new Response(res.body, { status: res.status, headers });
+}
+
+function attachVex(ses) {
+  ses.protocol.handle('vex', vexHandler);
+}
+
+module.exports = { registerScheme, attach, attachVex, PAGES };
