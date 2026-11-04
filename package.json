@@ -1,8 +1,8 @@
 {
   "name": "vanium",
   "productName": "Vanium",
-  "version": "0.1.0",
-  "description": "Vanium — быстрый минималистичный браузер на Electron",
+  "version": "0.1.1",
+  "description": "Vanium — быстрый минималистичный браузер",
   "author": "Vanium",
   "license": "MIT",
   "main": "src/main/main.js",
@@ -11,7 +11,8 @@
     "start": "electron .",
     "check": "node scripts/check.js",
     "dist": "electron-builder --win --x64 --publish never",
-    "dist:dir": "electron-builder --win --x64 --dir --publish never"
+    "dist:dir": "electron-builder --win --x64 --dir --publish never",
+    "pack:vex": "node scripts/pack-vex.js"
   },
   "devDependencies": {
     "electron": "^44.10.0",
@@ -32,8 +33,18 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -41,10 +52,22 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "Vanium",
-      "artifactName": "Vanium-Setup-${version}.${ext}"
+      "artifactName": "Vanium-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "portable": {
       "artifactName": "Vanium-Portable-${version}.${ext}"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": "vex",
+        "name": "Vanium Extension",
+        "description": "Vanium Extension",
+        "role": "Editor"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }
